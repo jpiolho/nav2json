@@ -13,6 +13,7 @@ namespace Nav2Json
         class ProgramOptions
         {
             public bool? Json { get; set; } = null;
+            public bool Upgrade { get; set; } = false;
             public bool Silent { get; set; } = false;
             public bool Overwrite { get; set; } = false;
             public string Output { get; set; } = null;
@@ -45,10 +46,10 @@ namespace Nav2Json
                 {
                     case ".nav": await NavToJsonAsync(filename); break;
                     case ".navjson": await JsonToNavAsync(filename); break;
+                    default:
+                        PrintLine("Could not identify the file"); break;
                 }
 
-                if (!options.Silent)
-                    Console.WriteLine("Could not identify the file");
             }
             else if(options.Json.Value)
             {
@@ -71,6 +72,7 @@ namespace Nav2Json
                 {
                     case "-json": options.Json = true; break;
                     case "-nav": options.Json = false; break;
+                    case "-upgrade": options.Upgrade = true; break;
 
                     case "-s": options.Silent = true; break;
                     case "-ow": options.Overwrite = true; break;
@@ -98,6 +100,7 @@ namespace Nav2Json
 
             Console.WriteLine("-json\tConvert from nav to a json file.");
             Console.WriteLine("-nav\tConvert from json to a nav file.");
+            Console.WriteLine("-upgrade\tRequires -json. Will upgrade the existing json with changes from the nav");
             Console.WriteLine("NOTE: If neither of the above are specified, automatic detection will be applied based on input file extension.");
             Console.WriteLine();
             Console.WriteLine("-s\tSilent.");
@@ -137,9 +140,9 @@ namespace Nav2Json
 
         private static async Task JsonToNavAsync(string path)
         {
-            var navJson = NavJson.FromJson(await File.ReadAllTextAsync(path));
-            var navGraph = navJson.ToNavigationGraph();
-            var navFile = navGraph.ToNavFile();
+            var navJson = NavJsonUtils.LoadAnyVersion(await File.ReadAllTextAsync(path));
+            var navGraph = navJson.ToNavigationGraphGeneric();
+            var navFile = navGraph.ToNavFileGeneric();
 
             var filename = Path.GetFileNameWithoutExtension(path);
 
@@ -159,33 +162,60 @@ namespace Nav2Json
                     await navFile.SaveAsync(fs);
             }
 
-            if (!options.Silent)
-                Console.WriteLine($"Converted {filename}.navjson to {filename}.nav");
+            PrintLine($"Converted {filename}.navjson (version {navJson.Version}) to {filename}.nav (version {navFile.Version})");
+        }
+
+
+        private static void PrintLine(string text) => Print(text + '\n');
+        private static void Print(string text)
+        {
+            if (options.Silent)
+                return;
+
+            Console.WriteLine(text);
         }
 
         private static async Task NavToJsonAsync(string path)
         {
-            NavFile navFile;
+            NavFileBase navFile;
             using (var fs = new FileStream(path, FileMode.Open))
-                navFile = await NavFile.FromStreamAsync(fs);
+                navFile = await NavFileUtils.LoadAnyVersionAsync(fs);
 
-            var navGraph = NavigationGraph.FromNavFile(navFile);
-            var navJson = NavJson.FromNavigationGraph(navGraph);
+            var navGraph = navFile.ToNavigationGraphGeneric();
+            var navJson = navGraph.ToNavJsonGeneric();
 
             var filename = Path.GetFileNameWithoutExtension(path);
+            var targetFile = options.Output ?? Path.Combine(Path.GetDirectoryName(path), $"{filename}.navjson");
 
-            // Fill in some details, so they at least show up in the json :)
-            var map = navJson.Map = new NavJsonMap();
-            map.Filename = options.JsonMapFilename ?? filename;
-            map.Author = options.JsonMapAuthor ?? "";
-            map.Name = options.JsonMapName ?? "";
-            map.Urls = options.JsonMapUrl.ToArray();
+            if (!options.Upgrade)
+            {
+                // Fill in some details, so they at least show up in the json :)
+                var map = navJson.Map = new NavJsonBase.MapInfo();
+                map.Filename = options.JsonMapFilename ?? filename;
+                map.Author = options.JsonMapAuthor ?? "";
+                map.Name = options.JsonMapName ?? "";
+                map.Urls = options.JsonMapUrl.ToArray();
 
-            navJson.Contributors = options.JsonContributors.ToArray();
-            navJson.Comments = options.JsonComment;
+                navJson.Contributors = options.JsonContributors.ToArray();
+                navJson.Comments = options.JsonComment ?? "";
+            }
+            else
+            {
+                if(!File.Exists(targetFile))
+                {
+                    PrintLine("Failed to find existing .navjson");
+                    return;
+                }
 
+                // Copy old details into new json
+                var oldJson = NavJson.FromJson(await File.ReadAllTextAsync(targetFile));
+                navJson.Map = oldJson.Map;
 
-            if(options.OutputToStdout)
+                navJson.Contributors = oldJson.Contributors;
+                navJson.Comments = oldJson.Comments;
+            }
+
+            if (options.OutputToStdout)
             {
                 using (var stdout = Console.OpenStandardOutput())
                 using (var writer = new StreamWriter(stdout))
@@ -193,16 +223,13 @@ namespace Nav2Json
             }
             else
             {
-                var targetFile = options.Output ?? Path.Combine(Path.GetDirectoryName(path), $"{filename}.navjson");
-
                 if (File.Exists(targetFile) && !AskToOverwrite())
                     return;
 
                 await File.WriteAllTextAsync(targetFile, navJson.ToJson());
             }
 
-            if(!options.Silent)
-                Console.WriteLine($"Converted {filename}.nav to {filename}.navjson");
+            PrintLine($"Converted {filename}.nav (version {navFile.Version}) to {filename}.navjson (version {navJson.Version})");
         }
     }
 }

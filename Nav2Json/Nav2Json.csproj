@@ -6,9 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="QuakeNavSharp">
-      <HintPath>..\..\QuakeNavSharp\QuakeNavSharp\bin\Debug\net5.0\QuakeNavSharp.dll</HintPath>
-    </Reference>
+    <PackageReference Include="QuakeNavSharp" Version="2.0.0" />
   </ItemGroup>
 
 </Project>
