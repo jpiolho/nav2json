@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="QuakeNavSharp" Version="2.0.1" />
+    <PackageReference Include="QuakeNavSharp" Version="3.0.0" />
   </ItemGroup>
 
 </Project>
